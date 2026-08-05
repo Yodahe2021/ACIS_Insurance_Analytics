@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import brentq
 
 DATA_SEP = "|"
 
@@ -89,6 +90,37 @@ COLUMNS = [
 CLAIM_RATE = 0.05
 CUSTOM_VALUE_MISSING_RATE = 0.78
 
+#: Ground-truth risk structure. The fixture is not pure noise: a model that
+#: works must be able to recover these effects, and the quality gates in the
+#: test suite (AUC, severity R^2) only mean something because they exist.
+PROVINCE_RISK = {
+    "Gauteng": 0.9,
+    "Western Cape": -0.4,
+    "KwaZulu-Natal": 0.6,
+    "Eastern Cape": 0.1,
+    "North West": -0.7,
+    "Mpumalanga": 0.3,
+    "Limpopo": -0.2,
+    "Free State": -0.5,
+    "Northern Cape": -0.8,
+}
+VEHICLE_FREQUENCY_RISK = {
+    "Passenger Vehicle": -0.2,
+    "Light Commercial": 0.4,
+    "Medium Commercial": 0.9,
+    "Heavy Commercial": 1.4,
+}
+VEHICLE_SEVERITY_EFFECT = {
+    "Passenger Vehicle": 0.0,
+    "Light Commercial": 0.45,
+    "Medium Commercial": 0.9,
+    "Heavy Commercial": 1.5,
+}
+
+
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-x))
+
 
 def make_dataframe(n_rows: int = 4000, seed: int = 42, claim_rate: float = CLAIM_RATE) -> pd.DataFrame:
     """Build a synthetic policy-transaction frame with production-like quirks."""
@@ -100,9 +132,34 @@ def make_dataframe(n_rows: int = 4000, seed: int = 42, claim_rate: float = CLAIM
         rng.integers(0, 18, size=n_rows) * 30, unit="D"
     )
 
-    claim_indicator = rng.random(n_rows) < claim_rate
-    # Claim amounts are right skewed; a handful of policies dominate total loss.
-    total_claims = np.where(claim_indicator, rng.lognormal(mean=8.5, sigma=1.6, size=n_rows), 0.0)
+    provinces = rng.choice(PROVINCES, size=n_rows)
+    vehicle_types = rng.choice(VEHICLE_TYPES, size=n_rows, p=[0.7, 0.2, 0.07, 0.03])
+    registration_years = rng.integers(1995, 2016, size=n_rows)
+    car_age = 2015 - registration_years
+    tracking = rng.choice(YES_NO, size=n_rows)
+    cylinders = rng.choice([3, 4, 6, 8], size=n_rows, p=[0.1, 0.75, 0.12, 0.03])
+    sum_insured = rng.lognormal(mean=12.3, sigma=0.45, size=n_rows).round(2).clip(1000)
+
+    # Claim frequency: province, vehicle class, vehicle age and anti-theft
+    # devices move the odds; the intercept is solved for the target claim rate.
+    risk_score = (
+        np.vectorize(PROVINCE_RISK.get)(provinces)
+        + np.vectorize(VEHICLE_FREQUENCY_RISK.get)(vehicle_types)
+        + 0.06 * car_age
+        - 0.60 * (tracking == "Yes")
+    )
+    intercept = brentq(lambda c: _sigmoid(c + risk_score).mean() - claim_rate, -25.0, 25.0)
+    claim_indicator = rng.random(n_rows) < _sigmoid(intercept + risk_score)
+
+    # Claim severity: driven by the value at risk and the vehicle class, with a
+    # heavy lognormal tail so a handful of claims dominate total loss.
+    severity_mu = (
+        6.4
+        + 0.90 * (np.log(sum_insured) - np.log(sum_insured).mean())
+        + np.vectorize(VEHICLE_SEVERITY_EFFECT.get)(vehicle_types)
+        + 0.10 * cylinders
+    )
+    total_claims = np.where(claim_indicator, rng.lognormal(mean=severity_mu, sigma=0.70, size=n_rows), 0.0)
 
     df = pd.DataFrame(
         {
@@ -119,28 +176,29 @@ def make_dataframe(n_rows: int = 4000, seed: int = 42, claim_rate: float = CLAIM
             "MaritalStatus": rng.choice(["Married", "Single", "Not specified"], size=n_rows),
             "Gender": rng.choice(GENDERS, size=n_rows, p=GENDER_WEIGHTS),
             "Country": "South Africa",
-            "Province": rng.choice(PROVINCES, size=n_rows),
+            "Province": provinces,
             "PostalCode": rng.choice([1459, 2000, 7784, 122, 299, 4001, 8001, 6001], size=n_rows),
             "MainCrestaZone": rng.choice(["Rand", "Cape Town", "Durban"], size=n_rows),
             "SubCrestaZone": rng.choice(["Johannesburg", "Pretoria", "Bellville"], size=n_rows),
             "ItemType": "Mobility - Motor",
             "mmcode": rng.integers(10000, 99999, size=n_rows),
-            "VehicleType": rng.choice(VEHICLE_TYPES, size=n_rows, p=[0.7, 0.2, 0.07, 0.03]),
-            "RegistrationYear": rng.integers(1995, 2016, size=n_rows),
+            "VehicleType": vehicle_types,
+            "RegistrationYear": registration_years,
             "make": rng.choice(MAKES, size=n_rows),
             "Model": rng.choice(["COROLLA", "POLO", "NP200", "RANGER"], size=n_rows),
-            "Cylinders": rng.choice([3, 4, 6, 8], size=n_rows, p=[0.1, 0.75, 0.12, 0.03]),
+            "Cylinders": cylinders,
             "cubiccapacity": rng.choice([1200, 1400, 1600, 2000, 2500, 3000], size=n_rows),
             "kilowatts": rng.integers(40, 190, size=n_rows),
             "bodytype": rng.choice(BODY_TYPES, size=n_rows),
             "NumberOfDoors": rng.choice([2, 4, 5], size=n_rows),
             "VehicleIntroDate": "6/2002",
-            "CustomValueEstimate": rng.normal(220_000, 90_000, size=n_rows).round(2),
+            # Where it is recorded at all, the custom value tracks the sum insured.
+            "CustomValueEstimate": (sum_insured * rng.normal(1.0, 0.15, size=n_rows)).round(2),
             "AlarmImmobiliser": rng.choice(YES_NO, size=n_rows),
-            "TrackingDevice": rng.choice(YES_NO, size=n_rows),
+            "TrackingDevice": tracking,
             "CapitalOutstanding": rng.normal(100_000, 40_000, size=n_rows).round(2),
             "NewVehicle": rng.choice(["More than 6 months", "New"], size=n_rows),
-            "SumInsured": rng.normal(250_000, 120_000, size=n_rows).round(2).clip(1000),
+            "SumInsured": sum_insured,
             "TermFrequency": "Monthly",
             "CalculatedPremiumPerTerm": rng.gamma(2.0, 60.0, size=n_rows).round(2),
             "ExcessSelected": rng.choice(["Mobility - Windscreen", "No excess"], size=n_rows),

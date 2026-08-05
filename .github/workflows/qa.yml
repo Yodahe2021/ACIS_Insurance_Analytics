@@ -36,3 +36,11 @@ jobs:
 
       - name: End-to-end pipeline and notebook runs
         run: pytest -m slow
+
+      - name: Working tree is clean after a full run
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "A pipeline run modified tracked files:"
+            git status --porcelain
+            exit 1
+          fi

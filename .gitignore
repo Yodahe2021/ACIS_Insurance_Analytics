@@ -12,3 +12,8 @@ __pycache__/
 .coverage
 coverage.xml
 .ipynb_checkpoints/
+
+# Pipeline outputs: models, metrics and regenerated figures. The published
+# figures under reports/ are deliverables and stay tracked; a pipeline run must
+# never overwrite them.
+artifacts/

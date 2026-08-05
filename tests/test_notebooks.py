@@ -58,33 +58,35 @@ def test_notebook_reads_data_through_a_relative_path(repo_root: Path, name: str)
     assert not ABSOLUTE_PATH.search(sources), f"{name} hard-codes a machine-specific path"
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        pytest.param(
-            EDA_NOTEBOOK,
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="QA-011: 01_EDA_and_Stats.ipynb is committed with outputs containing the "
-                "author's local Windows paths",
-            ),
-        ),
-        INTERPRETATION_NOTEBOOK,
-    ],
-)
+@pytest.mark.parametrize("name", NOTEBOOKS)
 def test_notebook_outputs_contain_no_absolute_paths(repo_root: Path, name: str):
+    """QA-011: committed outputs used to carry the author's local Windows paths."""
     notebook = _load(repo_root, name)
     assert not ABSOLUTE_PATH.search(json.dumps(notebook)), "committed outputs leak absolute filesystem paths"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-015: execution counts are non-sequential, so the notebooks were not run top-to-bottom "
-    "in a fresh kernel before being committed",
-)
 @pytest.mark.parametrize("name", NOTEBOOKS)
-def test_notebook_was_run_top_to_bottom(repo_root: Path, name: str):
+def test_notebook_outputs_are_stripped(repo_root: Path, name: str):
+    """QA-015: outputs are stripped on commit, so a diff shows code and nothing else."""
     notebook = _load(repo_root, name)
+    with_outputs = [i for i, c in enumerate(notebook["cells"]) if c.get("outputs")]
     counts = [c.get("execution_count") for c in notebook["cells"] if c["cell_type"] == "code"]
-    executed = [c for c in counts if c is not None]
-    assert executed == list(range(1, len(executed) + 1)), f"execution counts are {executed}"
+    assert not with_outputs, f"cells {with_outputs} were committed with outputs; run nbstripout"
+    assert all(count is None for count in counts), f"stale execution counts committed: {counts}"
+
+
+@pytest.mark.parametrize("name", NOTEBOOKS)
+def test_notebook_writes_figures_to_the_artefact_directory(repo_root: Path, name: str):
+    """Running a notebook must not overwrite the published figures under reports/."""
+    notebook = _load(repo_root, name)
+    statements = [
+        line
+        for cell in notebook["cells"]
+        if cell["cell_type"] == "code"
+        for line in "".join(cell["source"]).splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    offenders = [line for line in statements if "reports" in line and "figures" in line]
+    assert not offenders, f"the notebook writes into the tracked deliverables directory: {offenders}"
+    if any("savefig" in line for line in statements):
+        assert any("config.FIGURE_DIR" in line for line in statements)

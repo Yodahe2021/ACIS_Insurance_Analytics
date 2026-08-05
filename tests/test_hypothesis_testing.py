@@ -7,12 +7,19 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from src import config
+
 
 @pytest.fixture(scope="module")
 def loaded(hypothesis_module, synthetic_data_file: Path) -> pd.DataFrame:
     df = hypothesis_module.load_data(str(synthetic_data_file))
     assert df is not None, "load_data returned None for a well-formed extract"
     return df
+
+
+@pytest.fixture(scope="module")
+def suite(hypothesis_module, loaded):
+    return hypothesis_module.run_hypothesis_tests(loaded)
 
 
 def _run_and_capture(hypothesis_module, df, capsys) -> str:
@@ -48,77 +55,91 @@ def test_wrong_separator_is_detected(hypothesis_module, tmp_path: Path, syntheti
 
 
 def test_run_hypothesis_tests_tolerates_none(hypothesis_module):
-    hypothesis_module.run_hypothesis_tests(None)
+    report = hypothesis_module.run_hypothesis_tests(None)
+    assert report.results == []
 
 
-def test_all_four_hypotheses_are_reported(hypothesis_module, loaded, capsys):
+def test_all_hypotheses_in_the_family_are_reported(hypothesis_module, loaded, capsys):
     output = _run_and_capture(hypothesis_module, loaded, capsys)
-    for section in ("[Gender] Claim Frequency", "[Gender] Claim Severity", "[Province] Margin Difference",
-                    "[Province] Claim Frequency"):
+    for section in (
+        "[Gender] Claim Frequency",
+        "[Gender] Claim Severity",
+        "[Province] Margin Difference",
+        "[Province] Claim Frequency",
+        "[ZipCode] Margin Difference",
+        "[ZipCode] Claim Frequency",
+    ):
         assert section in output, f"missing hypothesis result: {section}"
+
+
+def test_zip_code_risk_is_tested(suite):
+    """QA-009: the postal-code hypothesis used to test margin only, never risk."""
+    assert "[ZipCode] Claim Frequency" in {result.name for result in suite.results}
 
 
 def test_every_decision_line_is_backed_by_a_p_value(hypothesis_module, loaded, capsys):
     output = _run_and_capture(hypothesis_module, loaded, capsys)
-    p_values = output.count("P-value =")
-    decisions = output.count("Decision:")
-    assert p_values == decisions, f"{decisions} decisions reported for {p_values} p-values"
+    assert output.count("P-value =") == output.count("Decision:")
 
 
-def test_gender_test_runs_on_a_small_but_sufficient_sample(hypothesis_module, capsys, tmp_path, synthetic_df):
-    """The severity t-test guard needs >30 claims per gender; verify it degrades gracefully."""
-    tiny = synthetic_df.head(200).copy()
-    tiny["Claim_Indicator"] = (tiny["TotalClaims"] > 0).astype(int)
-    tiny["Margin"] = tiny["TotalPremium"] - tiny["TotalClaims"]
-    hypothesis_module.run_hypothesis_tests(tiny)
-    output = capsys.readouterr().out
-    assert "Insufficient data for T-Test" in output or "[Gender] Claim Severity (T-Test)" in output
+def test_multiplicity_is_controlled(suite):
+    """QA-007: six tests at alpha=0.05 carry a ~26% family-wise false-positive rate."""
+    assert suite.correction in {"holm", "bonferroni", "fdr_bh"}
+    for result in suite.results:
+        assert result.p_adjusted is not None
+        assert result.p_adjusted >= result.p_value - 1e-12, "adjusted p-value is smaller than the raw one"
+        assert result.rejected == (result.p_adjusted < suite.alpha)
 
 
-def test_small_portfolio_does_not_silently_drop_hypotheses(hypothesis_module, capsys, tmp_path, synthetic_df):
-    """Below the hard-coded 1000-policy / 500-policy thresholds the tests are skipped.
-
-    The run still exits 0 and still prints the "use the rejected hypotheses" call to
-    action, so a reader cannot tell that no province or postal-code test was executed.
-    """
-    small = synthetic_df.head(900).copy()
-    small["Claim_Indicator"] = (small["TotalClaims"] > 0).astype(int)
-    small["Margin"] = small["TotalPremium"] - small["TotalClaims"]
-    hypothesis_module.run_hypothesis_tests(small)
-    output = capsys.readouterr().out
-    assert "Insufficient number of major provinces" in output
-    assert "ACTION: Use the rejected hypotheses" in output, (
-        "the summary line is printed unconditionally even when no test ran"
-    )
+def test_every_result_carries_an_effect_size_and_exposure(suite):
+    for result in suite.results:
+        assert result.effect, f"{result.name} reports no effect size"
+        assert result.n > 0, f"{result.name} reports no exposure"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-009: the postal-code hypothesis only tests margin; claim-frequency risk is never tested",
-)
-def test_zip_code_risk_is_tested(hypothesis_module, loaded, capsys):
-    output = _run_and_capture(hypothesis_module, loaded, capsys)
-    assert "[ZipCode] Claim Frequency" in output
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-007: five tests are reported against an uncorrected alpha=0.05",
-)
-def test_multiplicity_is_controlled(hypothesis_module):
-    source = Path(hypothesis_module.__file__).read_text(encoding="utf-8")
-    assert any(term in source.lower() for term in ("bonferroni", "holm", "multipletests", "fdr")), (
-        "no family-wise error-rate correction is applied across the hypothesis family"
-    )
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-008: 'Not specified' is the majority Gender value and is dropped without being reported",
-)
-def test_gender_test_reports_its_coverage(hypothesis_module, loaded, capsys):
+def test_gender_tests_disclose_their_coverage(hypothesis_module, loaded, capsys, suite):
+    """QA-008: 'Not specified' is the majority Gender value and was dropped in silence."""
     output = _run_and_capture(hypothesis_module, loaded, capsys)
     excluded_share = float((~loaded["Gender"].isin(["Female", "Male"])).mean())
-    assert excluded_share < 0.5 or "excluded" in output.lower(), (
-        f"{excluded_share:.0%} of policies are excluded from the gender hypothesis without disclosure"
-    )
+    assert "excluded" in output.lower()
+    assert suite.coverage["gender"]["excluded_share"] == pytest.approx(excluded_share)
+
+
+def test_under_powered_segments_are_reported_not_hidden(hypothesis_module, capsys, synthetic_df):
+    """QA-020: skipped hypotheses used to leave no trace in the output."""
+    small = synthetic_df.head(900).copy()
+    report = hypothesis_module.run_hypothesis_tests(small)
+    output = capsys.readouterr().out
+
+    assert not report.complete
+    assert {entry["test"] for entry in report.skipped} >= {"[Province] Margin Difference", "[Province] Claim Frequency"}
+    assert "NOT TESTED" in output
+    assert "coverage is INCOMPLETE" in output
+    assert "Use the rejected hypotheses" not in output, "a blanket call to action was printed for an untested book"
+
+
+def test_small_gender_sample_degrades_gracefully(hypothesis_module, capsys, synthetic_df):
+    tiny = synthetic_df.head(200).copy()
+    report = hypothesis_module.run_hypothesis_tests(tiny)
+    output = capsys.readouterr().out
+    assert "Insufficient data for T-Test" in output
+    assert any(entry["test"] == "[Gender] Claim Severity" for entry in report.skipped)
+
+
+def test_no_rate_change_is_recommended_without_a_surviving_rejection(hypothesis_module, capsys, synthetic_df):
+    noise = synthetic_df.head(4000).copy()
+    noise["TotalClaims"] = 0.0
+    noise.loc[noise.index[:100], "TotalClaims"] = 5000.0
+    hypothesis_module.run_hypothesis_tests(noise)
+    output = capsys.readouterr().out
+    if "no hypothesis survives" in output:
+        assert "Do not change rates on this evidence" in output
+
+
+def test_results_serialise_for_the_run_record(suite):
+    """QA-023: statistical findings must outlive the terminal they were printed in."""
+    payload = suite.to_dict()
+    assert payload["correction"] == config.MULTIPLICITY_METHOD
+    assert len(payload["results"]) == len(suite.results)
+    assert {"decision", "p_adjusted", "effect", "n"} <= set(payload["results"][0])
+    assert not suite.to_frame().empty

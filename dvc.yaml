@@ -1,0 +1,29 @@
+# Reproducible pipeline: `dvc repro` re-runs only what the inputs invalidate.
+# The dataset itself is tracked separately - see README section 2.
+stages:
+  hypothesis_tests:
+    cmd: python -m src.hypothesis_testing
+    deps:
+      - src/hypothesis_testing.py
+      - src/data.py
+      - src/config.py
+      - data/MachineLearningRating_v3.txt
+    outs:
+      - artifacts/metrics/hypothesis_tests.csv:
+          cache: false
+    metrics:
+      - artifacts/metrics/hypothesis_tests.json:
+          cache: false
+
+  train:
+    cmd: python -m src.modeling
+    deps:
+      - src/modeling.py
+      - src/data.py
+      - src/config.py
+      - data/MachineLearningRating_v3.txt
+    outs:
+      - artifacts/models
+    metrics:
+      - artifacts/metrics/model_metrics.json:
+          cache: false

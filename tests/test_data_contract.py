@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.data import validate_policies
+
 REQUIRED_COLUMNS = {
     "PolicyID": "integer",
     "TransactionMonth": "date-like",
@@ -88,14 +90,26 @@ def test_registration_year_is_plausible(dataset: pd.DataFrame):
     assert years.between(1900, 2030).all(), "RegistrationYear outside a plausible range -> negative Car_Age"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-005: CustomValueEstimate is ~78% NULL and the pipeline drops those rows outright",
-)
-def test_feature_completeness_allows_most_rows_through(dataset: pd.DataFrame):
-    complete = dataset.dropna(subset=list(REQUIRED_COLUMNS))
-    retention = len(complete) / len(dataset)
-    assert retention >= 0.9, (
-        f"only {retention:.1%} of rows have every modelling feature populated; "
-        "listwise deletion discards the majority of the portfolio"
+def test_rating_factors_are_incomplete_and_must_be_imputed(dataset: pd.DataFrame):
+    """Pins the property that makes listwise deletion unacceptable (QA-005).
+
+    If a future extract ever arrives complete this fails, and the imputation
+    strategy should be revisited rather than silently carried forward.
+    """
+    retention = len(dataset.dropna(subset=list(REQUIRED_COLUMNS))) / len(dataset)
+    assert retention < 0.9, (
+        f"{retention:.1%} of rows are complete; the extract no longer needs imputation to stay whole"
     )
+
+
+def test_validation_accepts_the_extract(dataset: pd.DataFrame):
+    report = validate_policies(dataset)
+    assert report.ok, f"the extract breaches the data contract: {report.errors}"
+
+
+def test_validation_rejects_a_broken_extract(dataset: pd.DataFrame):
+    broken = dataset.drop(columns=["TotalClaims"])
+    assert not validate_policies(broken).ok, "a missing target column was accepted"
+
+    empty = dataset.iloc[:0]
+    assert not validate_policies(empty).ok, "an empty extract was accepted"

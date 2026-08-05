@@ -23,6 +23,8 @@ STDLIB_OR_LOCAL = {
     "pathlib",
     "warnings",
     "datetime",
+    "dataclasses",
+    "importlib",
     "typing",
     "__future__",
     "src",
@@ -129,25 +131,49 @@ def test_dvc_pointer_file_is_not_ignored(repo_root: Path):
     )
 
 
+def test_a_reproducible_pipeline_is_defined(repo_root: Path):
+    """``dvc repro`` must be able to rebuild every artefact from the extract."""
+    assert (repo_root / "dvc.yaml").exists(), "no DVC pipeline definition"
+
+
 @pytest.mark.xfail(
     strict=True,
-    reason="QA-001: no .dvc pointer file is tracked, so 'dvc pull' is a silent no-op",
+    reason="QA-001: BLOCKED on the client - no .dvc pointer can be tracked until the real extract "
+    "and a shared remote are provided, so 'dvc pull' still restores nothing",
 )
 def test_dataset_is_tracked_by_dvc(repo_root: Path):
     pointers = [p for p in repo_root.rglob("*.dvc") if p.is_file()]
     assert pointers, "no DVC pointer file found; the dataset is not reproducible from a clean clone"
 
 
-@pytest.mark.xfail(strict=True, reason="QA-010: README advertises an MIT badge but no LICENSE file exists")
 def test_license_file_exists(repo_root: Path):
+    """QA-010: the README advertises an MIT badge."""
     assert (repo_root / "LICENSE").exists() or (repo_root / "LICENSE.md").exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-012: reports/figures is duplicated under notebooks/reports/figures",
-)
 def test_figures_are_stored_once(repo_root: Path):
+    """QA-012: figures used to be committed twice, under two directories that drifted apart."""
     assert not (repo_root / "notebooks" / "reports").exists(), (
         "figures are committed twice (reports/figures and notebooks/reports/figures)"
     )
+
+
+def test_generated_outputs_are_ignored(repo_root: Path):
+    """Models, metrics and regenerated figures must never dirty the working tree."""
+    gitignore = (repo_root / ".gitignore").read_text(encoding="utf-8")
+    assert "artifacts/" in gitignore
+
+
+def test_notebook_outputs_are_stripped_on_commit(repo_root: Path):
+    """QA-011/QA-015 stay fixed only if the hook is wired in."""
+    config_file = repo_root / ".pre-commit-config.yaml"
+    assert config_file.exists(), "no pre-commit configuration"
+    assert "nbstripout" in config_file.read_text(encoding="utf-8")
+
+
+def test_a_model_card_documents_the_pricing_model(repo_root: Path):
+    card = repo_root / "docs" / "MODEL_CARD.md"
+    assert card.exists(), "no model card; the pricing model ships undocumented"
+    text = card.read_text(encoding="utf-8").lower()
+    for section in ("intended use", "limitation", "fairness", "monitoring"):
+        assert section in text, f"the model card does not cover {section}"
