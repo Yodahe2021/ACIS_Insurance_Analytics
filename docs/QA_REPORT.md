@@ -98,7 +98,7 @@ Severity: **C**ritical (invalidates results or blocks reproduction) · **H**igh 
 | QA-019 | M | Repo | `.gitignore` blocks DVC pointers; `.venv/` was committable | `test_dvc_pointer_file_is_not_ignored` — **fixed** |
 | QA-021 | M | Process | No tests, no CI, no lint gate | — **fixed** |
 | QA-010 | L | Legal | MIT badge with no `LICENSE` file | `test_license_file_exists` |
-| QA-011 | L | Repo | Notebook outputs leak `C:\Users\YODAHE\...` paths | `test_notebook_outputs_contain_no_absolute_paths` |
+| QA-011 | L | Repo | `01_EDA_and_Stats.ipynb` outputs leak `C:\Users\YODAHE\...` paths (7 occurrences; `Model_Interpretation.ipynb` is clean) | `test_notebook_outputs_contain_no_absolute_paths` |
 | QA-012 | L | Repo | `reports/figures` duplicated under `notebooks/reports/figures` | `test_figures_are_stored_once` |
 | QA-015 | L | Repo | Notebooks not run top-to-bottom before commit | `test_notebook_was_run_top_to_bottom` |
 | QA-023 | L | Ops | Statistical results exist only as stdout, never persisted | — (§3.11) |
@@ -341,8 +341,8 @@ model informs a real price.
 | QA-021 | Zero tests, zero CI, zero lint. Nothing prevented any finding above from being merged. |
 | QA-022 | `load_data` returns `None` on a bad file and the caller prints a message and exits 0 — a failed run is indistinguishable from a clean one to any automation. |
 | QA-023 | Task 3 results exist only as terminal output. Nothing is written to `reports/`, so results cannot be diffed between runs or cited. |
-| QA-012 | `reports/figures/` is duplicated verbatim under `notebooks/reports/figures/` (~1.7 MB of identical PNGs), created because the notebook's `FIGURES_PATH` resolves differently depending on the working directory. |
-| QA-011 / QA-015 | Committed notebook outputs embed `C:\Users\YODAHE\Desktop\...`, and execution counts run 72→80 and 60 — the notebooks were never re-run cleanly before commit. |
+| QA-012 | `reports/figures/` is duplicated verbatim under `notebooks/reports/figures/` (~1.7 MB of identical PNGs), created because the notebook's `FIGURES_PATH` resolves differently depending on the working directory. Relatedly, those 9 figures are **tracked**, and re-running the EDA notebook overwrites them in place — so a reviewer running the pipeline on sample data can silently commit synthetic plots over the real ones. Write figures to an ignored output directory. |
+| QA-011 / QA-015 | `01_EDA_and_Stats.ipynb` embeds `C:\Users\YODAHE\Desktop\...` in 7 committed outputs, and execution counts run 72→80 and 60 — the notebooks were never re-run cleanly before commit. |
 | QA-010 | README shows an MIT badge; there is no `LICENSE` file, so the work is under exclusive copyright by default. |
 
 ---
@@ -462,7 +462,7 @@ Ordered by return on effort. Effort is a rough estimate for one engineer.
 | `pyproject.toml` | `pytest` and `ruff` configuration |
 | Fixes | QA-017 (dependencies), QA-018 (conflict markers), QA-019 (`.gitignore`), 58 lint violations (all whitespace / import ordering) |
 
-Current state: **61 tests — 44 pass, 17 `xfail` (one per open finding)**, `src/` line coverage 74%,
+Current state: **61 tests — 45 pass, 16 `xfail` (one per open finding)**, `src/` line coverage 74%,
 `ruff` clean.
 
 ### Running the suite

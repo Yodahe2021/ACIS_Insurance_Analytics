@@ -10,52 +10,71 @@ import pytest
 
 ABSOLUTE_PATH = re.compile(r"[A-Za-z]:\\{1,2}Users\\{1,2}|/Users/[a-z]|/home/[a-z]")
 
+EDA_NOTEBOOK = "01_EDA_and_Stats.ipynb"
+INTERPRETATION_NOTEBOOK = "Model_Interpretation.ipynb"
+NOTEBOOKS = [EDA_NOTEBOOK, INTERPRETATION_NOTEBOOK]
 
-def _notebooks(repo_root: Path) -> list[Path]:
-    return sorted(p for p in (repo_root / "notebooks").glob("*.ipynb"))
 
+def _load(repo_root: Path, name: str) -> dict:
+    """Parse a notebook, skipping the test if it is not present.
 
-@pytest.fixture(params=["01_EDA_and_Stats.ipynb", "Model_Interpretation.ipynb"])
-def notebook(request, repo_root: Path) -> dict:
-    path = repo_root / "notebooks" / request.param
+    The path is deliberately not stored on the returned dict: these tests
+    serialise it and scan for absolute paths, so injecting the checkout
+    location would make the result depend on where the repo was cloned.
+    """
+    path = repo_root / "notebooks" / name
     if not path.exists():
-        pytest.skip(f"{request.param} not present")
-    nb = json.loads(path.read_text(encoding="utf-8"))
-    nb["__path__"] = str(path)
-    return nb
+        pytest.skip(f"{name} not present")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def test_notebooks_exist(repo_root: Path):
-    assert _notebooks(repo_root), "no notebooks found"
+    assert sorted(p.name for p in (repo_root / "notebooks").glob("*.ipynb")), "no notebooks found"
 
 
-def test_notebook_is_valid_nbformat(notebook: dict):
+@pytest.mark.parametrize("name", NOTEBOOKS)
+def test_notebook_is_valid_nbformat(repo_root: Path, name: str):
+    notebook = _load(repo_root, name)
     assert notebook.get("nbformat") == 4
     assert isinstance(notebook.get("cells"), list)
 
 
-def test_notebook_has_no_error_outputs(notebook: dict):
+@pytest.mark.parametrize("name", NOTEBOOKS)
+def test_notebook_has_no_error_outputs(repo_root: Path, name: str):
+    notebook = _load(repo_root, name)
     errors = [
         f"{o.get('ename')}: {o.get('evalue')}"
         for cell in notebook["cells"]
         for o in cell.get("outputs", [])
         if o.get("output_type") == "error"
     ]
-    assert not errors, f"{notebook['__path__']} was committed with tracebacks: {errors}"
+    assert not errors, f"{name} was committed with tracebacks: {errors}"
 
 
-def test_notebook_reads_data_through_a_relative_path(notebook: dict):
+@pytest.mark.parametrize("name", NOTEBOOKS)
+def test_notebook_reads_data_through_a_relative_path(repo_root: Path, name: str):
+    notebook = _load(repo_root, name)
     sources = "".join("".join(c["source"]) for c in notebook["cells"] if c["cell_type"] == "code")
-    assert not ABSOLUTE_PATH.search(sources), "notebook source hard-codes a machine-specific path"
+    assert not ABSOLUTE_PATH.search(sources), f"{name} hard-codes a machine-specific path"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="QA-011: notebooks are committed with outputs containing the author's local Windows paths",
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param(
+            EDA_NOTEBOOK,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason="QA-011: 01_EDA_and_Stats.ipynb is committed with outputs containing the "
+                "author's local Windows paths",
+            ),
+        ),
+        INTERPRETATION_NOTEBOOK,
+    ],
 )
-def test_notebook_outputs_contain_no_absolute_paths(notebook: dict):
-    text = json.dumps(notebook)
-    assert not ABSOLUTE_PATH.search(text), "committed outputs leak absolute filesystem paths"
+def test_notebook_outputs_contain_no_absolute_paths(repo_root: Path, name: str):
+    notebook = _load(repo_root, name)
+    assert not ABSOLUTE_PATH.search(json.dumps(notebook)), "committed outputs leak absolute filesystem paths"
 
 
 @pytest.mark.xfail(
@@ -63,7 +82,9 @@ def test_notebook_outputs_contain_no_absolute_paths(notebook: dict):
     reason="QA-015: execution counts are non-sequential, so the notebooks were not run top-to-bottom "
     "in a fresh kernel before being committed",
 )
-def test_notebook_was_run_top_to_bottom(notebook: dict):
+@pytest.mark.parametrize("name", NOTEBOOKS)
+def test_notebook_was_run_top_to_bottom(repo_root: Path, name: str):
+    notebook = _load(repo_root, name)
     counts = [c.get("execution_count") for c in notebook["cells"] if c["cell_type"] == "code"]
     executed = [c for c in counts if c is not None]
     assert executed == list(range(1, len(executed) + 1)), f"execution counts are {executed}"
