@@ -1,5 +1,5 @@
 # 🏦 AlphaCare Insurance Solutions (ACIS)
-**End-to-End Insurance Risk Analytics & Predictive Modeling**  
+**End-to-End Insurance Risk Analytics & Predictive Modeling**
 **10 Academy – Week 1 Challenge | December 03–09, 2025**
 
 [![Python](https://img.shields.io/badge/Python-3.10-blue)](#)
@@ -28,15 +28,15 @@ This repository provides a complete end-to-end workflow for building a **risk an
 
 The project includes:
 
-- ✔️ **Data ingestion & versioning** with DVC  
-- ✔️ Comprehensive **Exploratory Data Analysis (EDA)**  
-- ✔️ **Hypothesis Testing** (A/B statistical tests)  
-- ✔️ Predictive Modeling  
-  - Claim **Probability Model**  
-  - Claim **Severity Model**  
-  - Final **Risk-Based Premium Calculation**  
-- ✔️ Automated visual reporting  
-- ✔️ GitHub feature-branch workflow with pull requests  
+- ✔️ **Data ingestion & versioning** with DVC
+- ✔️ Comprehensive **Exploratory Data Analysis (EDA)**
+- ✔️ **Hypothesis Testing** (A/B statistical tests)
+- ✔️ Predictive Modeling
+  - Claim **Probability Model**
+  - Claim **Severity Model**
+  - Final **Risk-Based Premium Calculation**
+- ✔️ Automated visual reporting
+- ✔️ GitHub feature-branch workflow with pull requests
 - ✔️ Fully reproducible research environment
 
 ---
@@ -45,7 +45,7 @@ The project includes:
 
 ## 2.1 Project Structure & Version Control
 
-The project uses a **Feature Branch Workflow**:  
+The project uses a **Feature Branch Workflow**:
 `task-1` → `task-2` → `task-3` → `task-4` → merge to `main` through PRs.
 
 ### Project Directory (Rendered with Mermaid)
