@@ -1,1 +1,14 @@
-data/
+# Datasets are versioned with DVC - keep the pointer files, drop the payload.
+data/*
+!data/.gitignore
+!data/*.dvc
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+.ipynb_checkpoints/

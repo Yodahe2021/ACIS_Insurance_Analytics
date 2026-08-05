@@ -144,6 +144,26 @@ Task 2 is fully completed:
 
 ---
 
+# 3.1 Quality Assurance
+
+An end-to-end QA review of this project — reproduction results, a findings register, gap analysis
+and a prioritised remediation plan — is in [`docs/QA_REPORT.md`](docs/QA_REPORT.md).
+
+The automated suite that backs it runs without the 500 MB dataset:
+
+```bash
+pip install -r requirements-dev.txt
+pytest -m "not slow"   # contracts, units, repo hygiene
+pytest -m slow         # full script and notebook execution
+ruff check .
+```
+
+> ⚠️ The QA review found that the loss-ratio figures in §4 below are incorrect and that
+> `dvc pull` currently restores nothing. See QA-016 and QA-001 in the report before acting on any
+> pricing recommendation on this page.
+
+---
+
 # 4. Exploratory Data Analysis (Task 1) — Summary
 
 **Dataset Size:** 1,000,189 policies  
