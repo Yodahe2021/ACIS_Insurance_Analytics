@@ -1,1 +1,19 @@
-data/
+# Datasets are versioned with DVC - keep the pointer files, drop the payload.
+data/*
+!data/.gitignore
+!data/*.dvc
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+.ipynb_checkpoints/
+
+# Pipeline outputs: models, metrics and regenerated figures. The published
+# figures under reports/ are deliverables and stay tracked; a pipeline run must
+# never overwrite them.
+artifacts/
