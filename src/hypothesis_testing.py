@@ -176,7 +176,16 @@ def _gender_tests(df: pd.DataFrame, report: TestSuiteReport) -> None:
     )
 
     grouped = tested.groupby("Gender").agg(policies=("PolicyID", "count"), claims=("Claim_Indicator", "sum"))
-    if set(GENDER_GROUPS) <= set(grouped.index):
+    thin = [
+        f"{group} ({int(grouped.loc[group, 'policies']):,} policies)"
+        for group in GENDER_GROUPS
+        if group in grouped.index and grouped.loc[group, "policies"] < config.MIN_SEGMENT_POLICIES
+    ]
+    if thin:
+        reason = f"below the {config.MIN_SEGMENT_POLICIES:,}-policy credibility threshold: {', '.join(thin)}"
+        report.skipped.append({"test": "[Gender] Claim Frequency", "reason": reason})
+        print(f"\n[Gender] Claim Frequency: NOT TESTED - {reason}.")
+    elif set(GENDER_GROUPS) <= set(grouped.index):
         counts_ = grouped.loc[list(GENDER_GROUPS), "claims"].tolist()
         nobs = grouped.loc[list(GENDER_GROUPS), "policies"].tolist()
         statistic, p_value = proportions_ztest(counts_, nobs)
@@ -311,7 +320,12 @@ def _print_summary(report: TestSuiteReport) -> None:
             "no pricing decision may be taken for them on the basis of this run."
         )
 
-    if significant:
+    if significant and not report.complete:
+        print("\nACTION: PROVISIONAL ONLY - the correction above was applied to a partial family, so these")
+        print("rejections cannot carry a rating change until the untested segments are closed:")
+        for result in significant:
+            print(f"  - {result.name}: {result.effect}")
+    elif significant:
         print("\nACTION: the following rejections survive family-wise correction and may justify a rating change,")
         print("subject to exposure, credibility weighting and a loss-ratio view of the same segment:")
         for result in significant:

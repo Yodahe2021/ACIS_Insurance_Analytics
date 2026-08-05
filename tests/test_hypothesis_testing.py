@@ -118,6 +118,39 @@ def test_under_powered_segments_are_reported_not_hidden(hypothesis_module, capsy
     assert "Use the rejected hypotheses" not in output, "a blanket call to action was printed for an untested book"
 
 
+def test_a_thin_book_cannot_earn_a_rating_recommendation(hypothesis_module, capsys, synthetic_df):
+    """Every hypothesis carries an exposure gate, and a partial family is provisional.
+
+    A 40-policy book used to clear the gender frequency test - the one factor the
+    model is forbidden to price on - and print the same call to action as a
+    credible run.
+    """
+    tiny = synthetic_df.head(40).copy()
+    report = hypothesis_module.run_hypothesis_tests(tiny)
+    output = capsys.readouterr().out
+
+    assert not report.results, f"a 40-policy book produced testable hypotheses: {report.results}"
+    assert len(report.skipped) == 6
+    assert "coverage is INCOMPLETE" in output
+    assert "may justify a rating change" not in output
+
+
+def test_a_partial_family_marks_its_rejections_provisional(hypothesis_module, capsys, synthetic_df):
+    partial = pd.concat(
+        [
+            synthetic_df[synthetic_df["Province"] == "Gauteng"].head(4000),
+            synthetic_df[synthetic_df["Province"] == "North West"].head(4000),
+        ]
+    )
+    report = hypothesis_module.run_hypothesis_tests(partial)
+    output = capsys.readouterr().out
+
+    assert not report.complete, "this book was expected to leave some segment untested"
+    if any(result.rejected for result in report.results):
+        assert "PROVISIONAL ONLY" in output
+        assert "may justify a rating change" not in output
+
+
 def test_small_gender_sample_degrades_gracefully(hypothesis_module, capsys, synthetic_df):
     tiny = synthetic_df.head(200).copy()
     report = hypothesis_module.run_hypothesis_tests(tiny)

@@ -8,6 +8,7 @@ of quietly producing a plausible-looking price.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,6 +31,9 @@ MONETARY_COLUMNS: tuple[str, ...] = ("TotalPremium", "TotalClaims", "SumInsured"
 
 #: Above this share of nulls a rating factor is reported as unreliable.
 HIGH_MISSINGNESS = 0.5
+
+#: Bytes of the file tail inspected for a severed final record.
+TAIL_BYTES = 1 << 16
 
 
 class DataValidationError(RuntimeError):
@@ -105,6 +109,34 @@ def validate_policies(df: pd.DataFrame, required_columns: tuple[str, ...] = REQU
     return report
 
 
+def _truncation_errors(path: Path, sep: str, header: list[str]) -> list[str]:
+    """Detect an extract cut short mid-record, which pandas pads into a valid row.
+
+    A half-downloaded or killed export ends in a severed line. ``read_csv`` fills
+    the missing fields with ``NaN``, so the file parses, the row survives, and the
+    book is priced off whatever fraction arrived. Only a *short* final record is
+    reported: a quoted separator can inflate the count, never shorten it.
+    """
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        size = handle.tell()
+        handle.seek(max(size - TAIL_BYTES, 0))
+        tail = handle.read(TAIL_BYTES).decode("utf-8", errors="replace")
+
+    lines = [line for line in tail.splitlines() if line.strip()]
+    if not lines:
+        return []
+
+    fields = lines[-1].count(sep) + 1
+    if fields < len(header):
+        return [
+            f"extract appears truncated: the final record has {fields} of {len(header)} fields. "
+            f"Re-fetch it - pandas pads the missing fields with nulls and the book would be "
+            f"priced off however much of it arrived"
+        ]
+    return []
+
+
 def add_derived_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Add the columns every downstream task needs, without mutating the input."""
     out = df.copy()
@@ -143,6 +175,12 @@ def load_policies(
         raise DataValidationError(f"{path} could not be parsed with separator {sep!r}: {exc}") from exc
 
     report = validate_policies(df, required_columns=required_columns)
+    report.errors.extend(_truncation_errors(path, sep, list(df.columns)))
+    if config.MIN_EXTRACT_ROWS and report.row_count < config.MIN_EXTRACT_ROWS:
+        report.errors.append(
+            f"extract holds {report.row_count:,} rows, below the {config.MIN_EXTRACT_ROWS:,} "
+            f"expected (ACIS_MIN_ROWS) - it is incomplete"
+        )
     if verbose:
         print(report.render())
     if strict and not report.ok:

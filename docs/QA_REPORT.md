@@ -18,7 +18,7 @@ differ, the finding row in §3 carries the status.
 
 | | Findings | |
 |---|---|---|
-| **Closed** | 28 of 30 | Each is now pinned by a passing test, not by prose |
+| **Closed** | 30 of 32 | Each is now pinned by a passing test, not by prose |
 | **Open, blocked on the client** | QA-001 | No `.dvc` pointer or shared remote can exist without the real extract; pinned as a strict `xfail` |
 | **Open, needs the real data** | QA-027 (new) | Every metric in the repo comes from the synthetic fixture; the models have never been fitted to the production extract |
 
@@ -36,6 +36,7 @@ What changed, in one table:
 | Gender used as a rating factor, no sign-off | Excluded by default behind an explicit flag; rationale in `docs/MODEL_CARD.md` |
 | Nothing persisted; results lived in stdout | `artifacts/models/*.joblib`, `artifacts/metrics/*.json`, `dvc.yaml` |
 | No runtime validation | `src/data.py` validates the contract on every load and raises |
+| A half-downloaded extract priced the book off whatever arrived | A severed final record is rejected; `ACIS_MIN_ROWS` catches a cut on a line boundary |
 | Notebook runs overwrote the tracked figures | Runs write to the ignored `artifacts/figures/`; CI fails if the tree is dirty after a run |
 
 > **This does not make the project production-ready.** It makes it *correct on the data it can
@@ -139,6 +140,8 @@ Severity: **C**ritical (invalidates results or blocks reproduction) · **H**igh 
 | QA-015 | L | Repo | Notebooks not run top-to-bottom before commit | Closed | `test_notebook_outputs_are_stripped` + `nbstripout` hook |
 | QA-023 | L | Ops | Statistical results exist only as stdout, never persisted | Closed | `test_results_serialise_for_the_run_record` |
 | QA-025 | L | Code | Deprecated `use_label_encoder` argument | Closed | Removed in the rewrite |
+| QA-031 | C | Data | A truncated extract exited 0 and priced the book off half the exposure | Closed | `test_a_truncated_extract_is_rejected_rather_than_priced` |
+| QA-032 | H | Statistics | A 40-policy book earned a rating-change recommendation via the ungated gender test | Closed | `test_a_thin_book_cannot_earn_a_rating_recommendation` |
 
 ### 3.1 QA-001 — Data versioning is decorative (Critical)
 
@@ -531,12 +534,35 @@ and `artifacts/metrics/hypothesis_tests.json` against the gates in `docs/MODEL_C
 | `dvc.yaml`, `.pre-commit-config.yaml`, `LICENSE` | Reproducible stages, hooks, licence |
 | Notebooks (rewritten) | Call `src/`, carry no outputs, write to the ignored artefacts directory |
 
-Current state: **83 tests — 82 pass, 1 `xfail` (QA-001, blocked on the client)**, `ruff` clean.
+Current state: **88 tests — 87 pass, 1 `xfail` (QA-001, blocked on the client)**, `ruff` clean.
+
+### 6.1 QA-031 / QA-032 — found by attacking the fixes, not by re-running them
+
+An adversarial pass over the hardened branch broke two of its own safety claims. Both are closed:
+
+- **QA-031.** Cutting the extract in half at a byte offset — what a failed download or a killed
+  export produces — left a file that parsed cleanly: pandas pads the severed final record with
+  `NaN`, `dropna(subset=["TotalClaims"])` deletes the evidence, and both entry points exited **0**
+  with plausible numbers and persisted artefacts. `validate_policies` checked columns, dtypes,
+  emptiness and null targets, but never the *shape of the file*. It now rejects a short final
+  record, and `ACIS_MIN_ROWS` lets an operator declare the expected size so a cut on a line
+  boundary is caught too.
+- **QA-032.** `Province` was gated at 1,000 policies and `PostalCode` at 500, but the gender
+  frequency z-test had no exposure gate at all. A 40-policy book therefore printed
+  `coverage is INCOMPLETE` and then a rating-change recommendation — on the one factor the model is
+  forbidden to price on. The gate now applies to every hypothesis, and when the family is partial
+  any surviving rejection is marked `PROVISIONAL ONLY`. Separately, `src/modeling.py` refuses a
+  book below 500 policies or 50 claims instead of failing inside `train_test_split`.
+
+Also attacked and unbroken: the premium floor under five adversarial books and an injected hostile
+severity model (the unguarded formula reaches −R1.09 trillion where the guarded quote stays at
+R434.78), the clean-tree guarantee, the xgboost pin, and the five other corrupt-extract shapes.
 
 ### Running the suite
 
 ```bash
 pip install -r requirements-dev.txt
+pre-commit install
 python -m tests.synthetic_data   # only needed while the real extract is unavailable
 
 pytest -m "not slow"      # contracts, units, quality gates, hygiene

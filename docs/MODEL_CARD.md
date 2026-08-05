@@ -113,3 +113,7 @@ Once live, at minimum monthly:
 
 Retrain quarterly, or immediately after a rate change, a mix change or a data-contract change.
 `src/data.py` validates the contract on every load and raises rather than scoring a bad extract.
+
+**Set `ACIS_MIN_ROWS` to the expected extract size in any scheduled run.** A severed final record is
+always rejected, but an export cut on a line boundary is indistinguishable from a small book
+without a declared expectation — and pricing off half the exposure is silent by nature.

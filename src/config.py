@@ -81,6 +81,11 @@ MULTIPLICITY_METHOD = "holm"
 MIN_SEGMENT_POLICIES = 1000
 MIN_ZIP_POLICIES = 500
 
+#: Expected size of the extract. A truncated final record is always rejected,
+#: but a download severed on a line boundary is only detectable against an
+#: expected count, so operators should set ACIS_MIN_ROWS in production.
+MIN_EXTRACT_ROWS = int(os.environ.get("ACIS_MIN_ROWS", "0"))
+
 
 def feature_lists() -> tuple[list[str], list[str]]:
     """Return copies of the configured feature lists.

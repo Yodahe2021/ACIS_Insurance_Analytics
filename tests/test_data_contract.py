@@ -14,7 +14,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.data import validate_policies
+from src import config
+from src.data import DataValidationError, load_policies, validate_policies
+from tests.synthetic_data import write_dataset
 
 REQUIRED_COLUMNS = {
     "PolicyID": "integer",
@@ -113,3 +115,27 @@ def test_validation_rejects_a_broken_extract(dataset: pd.DataFrame):
 
     empty = dataset.iloc[:0]
     assert not validate_policies(empty).ok, "an empty extract was accepted"
+
+
+def test_a_truncated_extract_is_rejected_rather_than_priced(tmp_path: Path):
+    """Half a download parses cleanly; pandas pads the severed record with nulls."""
+    full = write_dataset(tmp_path / "full.txt", n_rows=400, seed=3)
+    payload = full.read_bytes()
+
+    truncated = tmp_path / "truncated.txt"
+    truncated.write_bytes(payload[: len(payload) // 2])
+
+    with pytest.raises(DataValidationError, match="truncated"):
+        load_policies(truncated, strict=True, verbose=False)
+
+    assert load_policies(full, strict=True, verbose=False)[1].ok, "the intact extract was rejected"
+
+
+def test_a_short_extract_is_rejected_when_the_expected_size_is_declared(tmp_path: Path, monkeypatch):
+    """A download severed on a line boundary is only visible against an expectation."""
+    path = write_dataset(tmp_path / "short.txt", n_rows=200, seed=4)
+    assert load_policies(path, strict=True, verbose=False)[1].ok
+
+    monkeypatch.setattr(config, "MIN_EXTRACT_ROWS", 1000)
+    with pytest.raises(DataValidationError, match="incomplete"):
+        load_policies(path, strict=True, verbose=False)

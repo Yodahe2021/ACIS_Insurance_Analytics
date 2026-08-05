@@ -61,6 +61,11 @@ PREMIUM_FLOOR = config.PREMIUM_FLOOR
 
 EMPTY_SPLIT: tuple[None, ...] = (None,) * 8
 
+#: Below this the split, the calibration folds and the CV selection cannot run,
+#: and a book this thin could not support a rate in any case.
+MIN_POLICIES_TO_MODEL = 500
+MIN_CLAIMS_TO_MODEL = 50
+
 
 @dataclass
 class TrainedModels:
@@ -208,6 +213,14 @@ def prep_data_for_modeling(file_path=DATA_PATH, sep: str = DATA_SEP):
 
     if y_probability.nunique() < 2:
         print("Error: the extract contains a single claim class; a frequency model cannot be fitted.")
+        return EMPTY_SPLIT
+
+    claim_count = int(y_probability.sum())
+    if claim_count < MIN_CLAIMS_TO_MODEL or len(modelled) < MIN_POLICIES_TO_MODEL:
+        print(
+            f"Error: the extract holds {len(modelled):,} policies and {claim_count:,} claims, below the "
+            f"{MIN_POLICIES_TO_MODEL:,} / {MIN_CLAIMS_TO_MODEL:,} needed to split, fit and evaluate two models."
+        )
         return EMPTY_SPLIT
 
     x_train_prob, x_test_prob, y_train_prob, y_test_prob = train_test_split(

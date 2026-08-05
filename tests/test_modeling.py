@@ -17,6 +17,7 @@ from sklearn.dummy import DummyRegressor
 from sklearn.metrics import brier_score_loss, r2_score, roc_auc_score
 
 from src import config
+from tests.synthetic_data import write_dataset
 
 EXPENSE_LOADING = config.EXPENSE_LOADING
 PROFIT_MARGIN = config.PROFIT_MARGIN
@@ -53,6 +54,15 @@ def test_prep_returns_eight_datasets(split):
 def test_prep_returns_nones_for_an_unreadable_file(modeling, tmp_path: Path):
     result = modeling.prep_data_for_modeling(str(tmp_path / "missing.txt"), "|")
     assert len(result) == 8 and all(part is None for part in result)
+
+
+def test_a_book_too_thin_to_model_is_refused_not_fitted(modeling, tmp_path: Path, capsys):
+    """A handful of policies cannot support a split, a calibration fold or a rate."""
+    path = write_dataset(tmp_path / "thin.txt", n_rows=40, seed=11)
+    result = modeling.prep_data_for_modeling(str(path), "|")
+
+    assert all(part is None for part in result)
+    assert "below the" in capsys.readouterr().out
 
 
 def test_train_and_test_sets_do_not_overlap(split):
